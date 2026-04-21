@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════
-//  🤖 AliExpress Scanner Bot — Powered by Bright Data
+//  🤖 AliExpress Scanner Bot
 // ══════════════════════════════════════════════════════════
 
 const TelegramBot = require('node-telegram-bot-api');
