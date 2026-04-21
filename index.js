@@ -8,7 +8,7 @@ const axios = require('axios');
 // ─── Config ──────────────────────────────────────────────
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const BRIGHTDATA_API_KEY = process.env.BRIGHTDATA_API_KEY;
-const DATASET_ID = 'gd_mlj9v75u1w1jvaxvwp'; // AliExpress Products
+const DATASET_ID = 'gd_mlj9v75u1w1jvaxvwp';
 
 console.log('─── STARTUP DEBUG ───');
 console.log('BOT_TOKEN loaded:', BOT_TOKEN ? 'YES (' + BOT_TOKEN.substring(0, 8) + '...)' : 'NO ❌');
@@ -19,12 +19,11 @@ console.log('─────────────────────');
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 // ══════════════════════════════════════════════════════════
-//  📡 BRIGHT DATA API FUNCTIONS
+//  📡 API FUNCTIONS
 // ══════════════════════════════════════════════════════════
 
-// ── Real-Time Scrape (up to 20 URLs) ─────────────────────
 async function scrapeBrightData(inputs) {
-  console.log('>>> Calling Bright Data /scrape with inputs:', JSON.stringify(inputs));
+  console.log('>>> Calling /scrape with inputs:', JSON.stringify(inputs));
   try {
     const response = await axios.post(
       'https://api.brightdata.com/datasets/v3/scrape',
@@ -38,8 +37,8 @@ async function scrapeBrightData(inputs) {
         timeout: 120000,
       }
     );
-    console.log('>>> Bright Data response status:', response.status);
-    console.log('>>> Bright Data response data count:', Array.isArray(response.data) ? response.data.length : 'not array');
+    console.log('>>> Response status:', response.status);
+    console.log('>>> Data count:', Array.isArray(response.data) ? response.data.length : 'not array');
     return { success: true, data: response.data };
   } catch (err) {
     if (err.response?.status === 202) {
@@ -59,9 +58,8 @@ async function scrapeBrightData(inputs) {
   }
 }
 
-// ── Batch Scrape (for many URLs) ─────────────────────────
 async function triggerBatch(inputs) {
-  console.log('>>> Calling Bright Data /trigger with', inputs.length, 'URLs');
+  console.log('>>> Calling /trigger with', inputs.length, 'URLs');
   try {
     const response = await axios.post(
       'https://api.brightdata.com/datasets/v3/trigger',
@@ -88,7 +86,6 @@ async function triggerBatch(inputs) {
   }
 }
 
-// ── Poll for results ─────────────────────────────────────
 async function pollAndDownload(snapshotId) {
   let status = 'collecting';
   let attempts = 0;
@@ -125,7 +122,7 @@ async function pollAndDownload(snapshotId) {
 }
 
 // ══════════════════════════════════════════════════════════
-//  🎨 FORMAT PRODUCT FOR TELEGRAM
+//  🎨 FORMAT PRODUCT
 // ══════════════════════════════════════════════════════════
 
 function formatProduct(p, index) {
@@ -165,12 +162,10 @@ function formatProduct(p, index) {
 //  🤖 TELEGRAM BOT COMMANDS
 // ══════════════════════════════════════════════════════════
 
-// ── /start ────────────────────────────────────────────────
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
-    `🛒 *ברוכים הבאים ל-AliExpress Scanner!*\n` +
-      `_Powered by Bright Data_ 🔬\n\n` +
+    `🛒 *ברוכים הבאים ל-AliExpress Scanner!*\n\n` +
       `📋 *פקודות:*\n\n` +
       `1️⃣ *סריקת מוצר לפי לינק:*\n` +
       `/scan <לינק מוצר>\n\n` +
@@ -185,7 +180,6 @@ bot.onText(/\/start/, (msg) => {
   );
 });
 
-// ── /scan <URL> — סריקת מוצר בודד ────────────────────────
 bot.onText(/\/scan (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   const url = match[1].trim();
@@ -196,7 +190,7 @@ bot.onText(/\/scan (.+)/, async (msg, match) => {
     return bot.sendMessage(chatId, '❌ נא לשלוח לינק מ-AliExpress');
   }
 
-  await bot.sendMessage(chatId, '⏳ *סורק את המוצר עם Bright Data...*', {
+  await bot.sendMessage(chatId, '⏳ *סורק את המוצר...*', {
     parse_mode: 'Markdown',
   });
 
@@ -218,7 +212,6 @@ bot.onText(/\/scan (.+)/, async (msg, match) => {
   }
 });
 
-// ── /batch <URL1> <URL2> ... — סריקת כמה מוצרים ──────────
 bot.onText(/\/batch (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   const urls = match[1]
@@ -271,7 +264,6 @@ bot.onText(/\/batch (.+)/, async (msg, match) => {
   }
 });
 
-// ── חיפוש חופשי בעברית ───────────────────────────────────
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
@@ -295,9 +287,9 @@ bot.on('message', async (msg) => {
     );
   }
 
-  console.log('>>> Free search received. Keyword:', keyword);
+  console.log('>>> Free search. Keyword:', keyword);
 
-  await bot.sendMessage(chatId, `🔍 *מחפש "${keyword}" עם Bright Data...*`, {
+  await bot.sendMessage(chatId, `🔍 *מחפש "${keyword}"...*`, {
     parse_mode: 'Markdown',
   });
 
@@ -326,6 +318,5 @@ bot.on('message', async (msg) => {
 
 // ══════════════════════════════════════════════════════════
 console.log('🤖 AliExpress Scanner Bot is running!');
-console.log('📡 Powered by Bright Data Scraper API');
 console.log('⏳ Waiting for messages...');
 // ══════════════════════════════════════════════════════════
