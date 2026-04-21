@@ -10,6 +10,12 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const BRIGHTDATA_API_KEY = process.env.BRIGHTDATA_API_KEY;
 const DATASET_ID = 'gd_mlj9v75u1w1jvaxvwp'; // AliExpress Products
 
+console.log('─── STARTUP DEBUG ───');
+console.log('BOT_TOKEN loaded:', BOT_TOKEN ? 'YES (' + BOT_TOKEN.substring(0, 8) + '...)' : 'NO ❌');
+console.log('BRIGHTDATA_API_KEY loaded:', BRIGHTDATA_API_KEY ? 'YES (' + BRIGHTDATA_API_KEY.substring(0, 8) + '...)' : 'NO ❌');
+console.log('DATASET_ID:', DATASET_ID);
+console.log('─────────────────────');
+
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 // ══════════════════════════════════════════════════════════
@@ -18,6 +24,7 @@ const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 // ── Real-Time Scrape (up to 20 URLs) ─────────────────────
 async function scrapeBrightData(inputs) {
+  console.log('>>> Calling Bright Data /scrape with inputs:', JSON.stringify(inputs));
   try {
     const response = await axios.post(
       'https://api.brightdata.com/datasets/v3/scrape',
@@ -31,21 +38,30 @@ async function scrapeBrightData(inputs) {
         timeout: 120000,
       }
     );
+    console.log('>>> Bright Data response status:', response.status);
+    console.log('>>> Bright Data response data count:', Array.isArray(response.data) ? response.data.length : 'not array');
     return { success: true, data: response.data };
   } catch (err) {
     if (err.response?.status === 202) {
       const sid = err.response.data.snapshot_id;
-      console.log('Switched to async, snapshot:', sid);
+      console.log('>>> Switched to async, snapshot:', sid);
       const data = await pollAndDownload(sid);
       return { success: !!data, data };
     }
-    console.error('Scrape error:', err.response?.data || err.message);
-    return { success: false, error: err.message };
+    console.error('=== SCRAPE ERROR DEBUG ===');
+    console.error('Status:', err.response?.status);
+    console.error('Data:', JSON.stringify(err.response?.data));
+    console.error('Message:', err.message);
+    console.error('API Key starts with:', BRIGHTDATA_API_KEY?.substring(0, 8) + '...');
+    console.error('URL sent:', JSON.stringify(inputs));
+    console.error('=========================');
+    return { success: false, error: err.response?.data?.message || err.message };
   }
 }
 
 // ── Batch Scrape (for many URLs) ─────────────────────────
 async function triggerBatch(inputs) {
+  console.log('>>> Calling Bright Data /trigger with', inputs.length, 'URLs');
   try {
     const response = await axios.post(
       'https://api.brightdata.com/datasets/v3/trigger',
@@ -59,12 +75,16 @@ async function triggerBatch(inputs) {
       }
     );
     const sid = response.data.snapshot_id;
-    console.log('Batch triggered, snapshot:', sid);
+    console.log('>>> Batch triggered, snapshot:', sid);
     const data = await pollAndDownload(sid);
     return { success: !!data, data };
   } catch (err) {
-    console.error('Batch error:', err.response?.data || err.message);
-    return { success: false, error: err.message };
+    console.error('=== BATCH ERROR DEBUG ===');
+    console.error('Status:', err.response?.status);
+    console.error('Data:', JSON.stringify(err.response?.data));
+    console.error('Message:', err.message);
+    console.error('=========================');
+    return { success: false, error: err.response?.data?.message || err.message };
   }
 }
 
@@ -100,6 +120,7 @@ async function pollAndDownload(snapshotId) {
       headers: { 'Authorization': `Bearer ${BRIGHTDATA_API_KEY}` },
     }
   );
+  console.log('>>> Downloaded results:', results.data?.length, 'items');
   return results.data;
 }
 
@@ -169,6 +190,8 @@ bot.onText(/\/scan (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   const url = match[1].trim();
 
+  console.log('>>> /scan command received. URL:', url);
+
   if (!url.includes('aliexpress.com')) {
     return bot.sendMessage(chatId, '❌ נא לשלוח לינק מ-AliExpress');
   }
@@ -178,6 +201,8 @@ bot.onText(/\/scan (.+)/, async (msg, match) => {
   });
 
   const result = await scrapeBrightData([{ url }]);
+
+  console.log('>>> /scan result:', result.success, '| data length:', result.data?.length);
 
   if (result.success && result.data?.length > 0) {
     bot.sendMessage(
@@ -200,6 +225,8 @@ bot.onText(/\/batch (.+)/, async (msg, match) => {
     .trim()
     .split(/\s+/)
     .filter((u) => u.includes('aliexpress.com'));
+
+  console.log('>>> /batch command received. URLs:', urls.length);
 
   if (urls.length === 0) {
     return bot.sendMessage(chatId, '❌ לא נמצאו לינקים תקינים מ-AliExpress');
@@ -268,12 +295,18 @@ bot.on('message', async (msg) => {
     );
   }
 
+  console.log('>>> Free search received. Keyword:', keyword);
+
   await bot.sendMessage(chatId, `🔍 *מחפש "${keyword}" עם Bright Data...*`, {
     parse_mode: 'Markdown',
   });
 
   const searchUrl = `https://www.aliexpress.com/wholesale?SearchText=${encodeURIComponent(keyword)}`;
+  console.log('>>> Search URL:', searchUrl);
+
   const result = await scrapeBrightData([{ url: searchUrl }]);
+
+  console.log('>>> Search result:', result.success, '| data length:', result.data?.length);
 
   if (result.success && result.data?.length > 0) {
     const header = `🛍️ *מצאתי ${result.data.length} תוצאות עבור "${keyword}":*\n\n`;
