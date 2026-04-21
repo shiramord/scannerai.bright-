@@ -39,7 +39,6 @@ async function scrapeBrightData(inputs) {
 
     console.log('>>> Response status:', response.status);
 
-    // ✅ FIX: Handle 202 (async redirect) in SUCCESS path
     if (response.status === 202) {
       const sid = response.data.snapshot_id;
       console.log('>>> Got 202 — switching to async. Snapshot:', sid);
@@ -47,15 +46,13 @@ async function scrapeBrightData(inputs) {
       return { success: !!data && data.length > 0, data };
     }
 
-    // Normal 200 response
     console.log('>>> Got 200 — data items:', Array.isArray(response.data) ? response.data.length : 'not array');
     return { success: true, data: response.data };
 
   } catch (err) {
-    // Also handle 202 in error path (some axios versions)
     if (err.response?.status === 202) {
       const sid = err.response.data.snapshot_id;
-      console.log('>>> Got 202 in catch — switching to async. Snapshot:', sid);
+      console.log('>>> Got 202 in catch — Snapshot:', sid);
       const data = await pollAndDownload(sid);
       return { success: !!data && data.length > 0, data };
     }
@@ -96,7 +93,7 @@ async function triggerBatch(inputs) {
 }
 
 async function pollAndDownload(snapshotId) {
-  console.log('>>> Starting polling for snapshot:', snapshotId);
+  console.log('>>> Polling snapshot:', snapshotId);
   let status = 'collecting';
   let attempts = 0;
 
@@ -116,11 +113,11 @@ async function pollAndDownload(snapshotId) {
   }
 
   if (status !== 'ready') {
-    console.error('>>> Job failed. Final status:', status);
+    console.error('>>> Job failed. Status:', status);
     return null;
   }
 
-  console.log('>>> Job ready! Downloading results...');
+  console.log('>>> Downloading results...');
   const results = await axios.get(
     `https://api.brightdata.com/datasets/v3/snapshot/${snapshotId}`,
     {
@@ -128,43 +125,64 @@ async function pollAndDownload(snapshotId) {
       headers: { 'Authorization': `Bearer ${BRIGHTDATA_API_KEY}` },
     }
   );
+
+  // 🔍 LOG: Show actual field names from Bright Data
+  if (results.data && results.data.length > 0) {
+    console.log('>>> FIELD NAMES:', Object.keys(results.data[0]).join(', '));
+    console.log('>>> RAW FIRST ITEM:', JSON.stringify(results.data[0]).substring(0, 1000));
+  }
+
   console.log('>>> Downloaded:', results.data?.length, 'items');
   return results.data;
 }
 
 // ══════════════════════════════════════════════════════════
-//  🎨 FORMAT PRODUCT
+//  🎨 FORMAT PRODUCT — tries multiple field name formats
 // ══════════════════════════════════════════════════════════
 
 function formatProduct(p, index) {
-  const name = p.title || 'מוצר ללא שם';
-  const finalPrice = p.final_price ? `$${p.final_price}` : null;
-  const initPrice = p.initial_price ? `$${p.initial_price}` : null;
-  const price = finalPrice || initPrice || 'לא זמין';
-  const discount =
-    initPrice && finalPrice && initPrice !== finalPrice
-      ? `  ~~${initPrice}~~`
-      : '';
-  const rating = p.rating ? `${p.rating}⭐` : 'אין דירוג';
-  const reviews = p.reviews_count
-    ? `(${Number(p.reviews_count).toLocaleString()} ביקורות)`
+  // Try multiple possible field names
+  const name = p.title || p.product_title || p.name || p.product_name || 'מוצר ללא שם';
+  
+  const fPrice = p.final_price || p.sale_price || p.target_sale_price || p.price || null;
+  const iPrice = p.initial_price || p.original_price || p.target_original_price || null;
+  const currency = p.currency || p.target_currency || 'USD';
+  
+  const price = fPrice ? `${fPrice} ${currency}` : 'לא זמין';
+  const discount = (iPrice && fPrice && iPrice !== fPrice) 
+    ? `  ~~${iPrice} ${currency}~~` 
     : '';
-  const brand = p.brand ? `🏷️ מותג: ${p.brand}\n` : '';
-  const category = p.product_category
-    ? `📂 קטגוריה: ${p.product_category}\n`
-    : '';
-  const desc = p.description
-    ? `📝 ${p.description.substring(0, 150)}...\n`
-    : '';
-  const url = p.url || '#';
+
+  const rating = p.rating || p.evaluate_rate || p.average_rating || null;
+  const ratingStr = rating ? `${rating}⭐` : 'אין דירוג';
+  
+  const reviews = p.reviews_count || p.review_count || p.feedback_count || null;
+  const reviewsStr = reviews ? `(${Number(reviews).toLocaleString()} ביקורות)` : '';
+
+  const brand = p.brand || p.brand_name || null;
+  const brandLine = brand ? `🏷️ מותג: ${brand}\n` : '';
+
+  const category = p.product_category || p.category || p.category_name || null;
+  const categoryLine = category ? `📂 קטגוריה: ${category}\n` : '';
+
+  const orders = p.orders_count || p.lastest_volume || p.total_orders || null;
+  const ordersLine = orders ? `📦 הזמנות: ${Number(orders).toLocaleString()}\n` : '';
+
+  const desc = p.description || p.product_description || null;
+  const descLine = desc ? `📝 ${desc.substring(0, 150)}...\n` : '';
+
+  const img = p.image_url || p.main_image || p.product_main_image_url || null;
+  
+  const url = p.url || p.product_url || p.product_detail_url || '#';
 
   return (
     `${index}️⃣ *${name}*\n` +
     `💰 מחיר: ${price}${discount}\n` +
-    `⭐ דירוג: ${rating} ${reviews}\n` +
-    brand +
-    category +
-    desc +
+    `⭐ דירוג: ${ratingStr} ${reviewsStr}\n` +
+    brandLine +
+    categoryLine +
+    ordersLine +
+    descLine +
     `🔗 [צפה במוצר](${url})\n`
   );
 }
