@@ -11,9 +11,8 @@ const BRIGHTDATA_API_KEY = process.env.BRIGHTDATA_API_KEY;
 const DATASET_ID = 'gd_mlj9v75u1w1jvaxvwp';
 
 console.log('─── STARTUP DEBUG ───');
-console.log('BOT_TOKEN loaded:', BOT_TOKEN ? 'YES (' + BOT_TOKEN.substring(0, 8) + '...)' : 'NO ❌');
-console.log('BRIGHTDATA_API_KEY loaded:', BRIGHTDATA_API_KEY ? 'YES (' + BRIGHTDATA_API_KEY.substring(0, 8) + '...)' : 'NO ❌');
-console.log('DATASET_ID:', DATASET_ID);
+console.log('BOT_TOKEN loaded:', BOT_TOKEN ? 'YES' : 'NO ❌');
+console.log('BRIGHTDATA_API_KEY loaded:', BRIGHTDATA_API_KEY ? 'YES' : 'NO ❌');
 console.log('─────────────────────');
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
@@ -23,7 +22,7 @@ const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 // ══════════════════════════════════════════════════════════
 
 async function scrapeBrightData(inputs) {
-  console.log('>>> Calling /scrape with inputs:', JSON.stringify(inputs));
+  console.log('>>> Calling /scrape with:', JSON.stringify(inputs));
   try {
     const response = await axios.post(
       'https://api.brightdata.com/datasets/v3/scrape',
@@ -37,23 +36,34 @@ async function scrapeBrightData(inputs) {
         timeout: 120000,
       }
     );
+
     console.log('>>> Response status:', response.status);
-    console.log('>>> Data count:', Array.isArray(response.data) ? response.data.length : 'not array');
+
+    // ✅ FIX: Handle 202 (async redirect) in SUCCESS path
+    if (response.status === 202) {
+      const sid = response.data.snapshot_id;
+      console.log('>>> Got 202 — switching to async. Snapshot:', sid);
+      const data = await pollAndDownload(sid);
+      return { success: !!data && data.length > 0, data };
+    }
+
+    // Normal 200 response
+    console.log('>>> Got 200 — data items:', Array.isArray(response.data) ? response.data.length : 'not array');
     return { success: true, data: response.data };
+
   } catch (err) {
+    // Also handle 202 in error path (some axios versions)
     if (err.response?.status === 202) {
       const sid = err.response.data.snapshot_id;
-      console.log('>>> Switched to async, snapshot:', sid);
+      console.log('>>> Got 202 in catch — switching to async. Snapshot:', sid);
       const data = await pollAndDownload(sid);
-      return { success: !!data, data };
+      return { success: !!data && data.length > 0, data };
     }
-    console.error('=== SCRAPE ERROR DEBUG ===');
+    console.error('=== SCRAPE ERROR ===');
     console.error('Status:', err.response?.status);
     console.error('Data:', JSON.stringify(err.response?.data));
     console.error('Message:', err.message);
-    console.error('API Key starts with:', BRIGHTDATA_API_KEY?.substring(0, 8) + '...');
-    console.error('URL sent:', JSON.stringify(inputs));
-    console.error('=========================');
+    console.error('====================');
     return { success: false, error: err.response?.data?.message || err.message };
   }
 }
@@ -75,18 +85,18 @@ async function triggerBatch(inputs) {
     const sid = response.data.snapshot_id;
     console.log('>>> Batch triggered, snapshot:', sid);
     const data = await pollAndDownload(sid);
-    return { success: !!data, data };
+    return { success: !!data && data.length > 0, data };
   } catch (err) {
-    console.error('=== BATCH ERROR DEBUG ===');
+    console.error('=== BATCH ERROR ===');
     console.error('Status:', err.response?.status);
     console.error('Data:', JSON.stringify(err.response?.data));
-    console.error('Message:', err.message);
-    console.error('=========================');
+    console.error('====================');
     return { success: false, error: err.response?.data?.message || err.message };
   }
 }
 
 async function pollAndDownload(snapshotId) {
+  console.log('>>> Starting polling for snapshot:', snapshotId);
   let status = 'collecting';
   let attempts = 0;
 
@@ -101,15 +111,16 @@ async function pollAndDownload(snapshotId) {
       status = res.data.status;
       console.log(`  Poll #${attempts}: ${status}`);
     } catch (err) {
-      console.error('  Poll error:', err.message);
+      console.error(`  Poll #${attempts} error:`, err.message);
     }
   }
 
   if (status !== 'ready') {
-    console.error('  Job did not complete. Final status:', status);
+    console.error('>>> Job failed. Final status:', status);
     return null;
   }
 
+  console.log('>>> Job ready! Downloading results...');
   const results = await axios.get(
     `https://api.brightdata.com/datasets/v3/snapshot/${snapshotId}`,
     {
@@ -117,7 +128,7 @@ async function pollAndDownload(snapshotId) {
       headers: { 'Authorization': `Bearer ${BRIGHTDATA_API_KEY}` },
     }
   );
-  console.log('>>> Downloaded results:', results.data?.length, 'items');
+  console.log('>>> Downloaded:', results.data?.length, 'items');
   return results.data;
 }
 
@@ -184,19 +195,19 @@ bot.onText(/\/scan (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   const url = match[1].trim();
 
-  console.log('>>> /scan command received. URL:', url);
+  console.log('>>> /scan URL:', url);
 
   if (!url.includes('aliexpress.com')) {
     return bot.sendMessage(chatId, '❌ נא לשלוח לינק מ-AliExpress');
   }
 
-  await bot.sendMessage(chatId, '⏳ *סורק את המוצר...*', {
+  await bot.sendMessage(chatId, '⏳ *סורק את המוצר... זה יכול לקחת עד דקה*', {
     parse_mode: 'Markdown',
   });
 
   const result = await scrapeBrightData([{ url }]);
 
-  console.log('>>> /scan result:', result.success, '| data length:', result.data?.length);
+  console.log('>>> /scan done. Success:', result.success, '| Items:', result.data?.length);
 
   if (result.success && result.data?.length > 0) {
     bot.sendMessage(
@@ -207,7 +218,7 @@ bot.onText(/\/scan (.+)/, async (msg, match) => {
   } else {
     bot.sendMessage(
       chatId,
-      `😕 לא הצלחתי לסרוק.\n🔎 שגיאה: ${result.error || 'unknown'}`
+      `😕 לא הצלחתי לסרוק.\n🔎 שגיאה: ${result.error || 'לא נמצאו תוצאות'}`
     );
   }
 });
@@ -219,7 +230,7 @@ bot.onText(/\/batch (.+)/, async (msg, match) => {
     .split(/\s+/)
     .filter((u) => u.includes('aliexpress.com'));
 
-  console.log('>>> /batch command received. URLs:', urls.length);
+  console.log('>>> /batch URLs:', urls.length);
 
   if (urls.length === 0) {
     return bot.sendMessage(chatId, '❌ לא נמצאו לינקים תקינים מ-AliExpress');
@@ -259,7 +270,7 @@ bot.onText(/\/batch (.+)/, async (msg, match) => {
   } else {
     bot.sendMessage(
       chatId,
-      `😕 לא הצלחתי לסרוק.\n🔎 שגיאה: ${result.error || 'unknown'}`
+      `😕 לא הצלחתי לסרוק.\n🔎 שגיאה: ${result.error || 'לא נמצאו תוצאות'}`
     );
   }
 });
@@ -287,9 +298,9 @@ bot.on('message', async (msg) => {
     );
   }
 
-  console.log('>>> Free search. Keyword:', keyword);
+  console.log('>>> Search keyword:', keyword);
 
-  await bot.sendMessage(chatId, `🔍 *מחפש "${keyword}"...*`, {
+  await bot.sendMessage(chatId, `🔍 *מחפש "${keyword}"... זה יכול לקחת עד דקה*`, {
     parse_mode: 'Markdown',
   });
 
@@ -298,7 +309,7 @@ bot.on('message', async (msg) => {
 
   const result = await scrapeBrightData([{ url: searchUrl }]);
 
-  console.log('>>> Search result:', result.success, '| data length:', result.data?.length);
+  console.log('>>> Search done. Success:', result.success, '| Items:', result.data?.length);
 
   if (result.success && result.data?.length > 0) {
     const header = `🛍️ *מצאתי ${result.data.length} תוצאות עבור "${keyword}":*\n\n`;
